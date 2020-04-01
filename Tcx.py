@@ -46,19 +46,16 @@ class Tcx():
         tree = objectify.parse(self.inputFile)
         self.root = tree.getroot()
         self.activity = self.root.Activities.Activity
+        self.offsetTimeDiff = self.getOffsetTimeDiff()
         self.diffInPercent = self.calculateDiffInPercent()
-        # self.hRDiffCoeficient = self.calculatehRDiffCoeficient()
-        # print(self.hRDiffCoeficient)
-        # exit()
+        self.hRDiffCoeficient = self.calculatehRDiffCoeficient()
         
     def calculateDiffInPercent(self):
         return round(float(self.getTimeInSeconds(self.newActivityTime) / self.duration), 3)   
 
     def calculatehRDiffCoeficient(self):
         if self.newActivityHr.isnumeric():
-            print(int(self.newActivityHr))
-            print(self.hearRate)
-            return int(int(self.newActivityHr) / self.hearRate)
+            return round(int(self.newActivityHr) / self.heartRate, 2)
         else:
             return 1
 
@@ -135,15 +132,25 @@ class Tcx():
             newLap['MaximumSpeed'] = lap.find('./tcx:MaximumSpeed', self.ns).text
             
             if (lap.find('./tcx:AverageHeartRateBpm', self.ns) != None):
-                newLap['AverageHeartRateBpm'] = lap.find('./tcx:AverageHeartRateBpm/tcx:Value', self.ns).text
+                newLap['AverageHeartRateBpm'] = self.newHeartRate(
+                    lap.find('./tcx:AverageHeartRateBpm/tcx:Value', self.ns).text
+                )
             
             if (lap.find('./tcx:MaximumHeartRateBpm', self.ns) != None):
-                newLap['MaximumHeartRateBpm'] = lap.find('./tcx:MaximumHeartRateBpm/tcx:Value', self.ns).text
-            
+                newLap['MaximumHeartRateBpm'] = self.newHeartRate(
+                    lap.find('./tcx:MaximumHeartRateBpm/tcx:Value', self.ns).text
+                )
             newLap['Intensity'] = lap.find('./tcx:Intensity', self.ns).text
             newLap['TriggerMethod'] = lap.find('./tcx:TriggerMethod', self.ns).text
             newLap['Track'] = self.processTrackpoints(lap, oldLap, newLap)
             
+            #TODO 
+            if lap.find('./tcx:Extensions/ns3:LX', self.ns) != None:
+                newLap['Extensions'] = {}
+                newLap['Extensions']['AvgSpeed'] = lap.find('./tcx:Extensions/ns3:LX/ns3:AvgSpeed', self.ns).text
+                newLap['Extensions']['AvgRunCadence'] = lap.find('./tcx:Extensions/ns3:LX/ns3:AvgRunCadence', self.ns).text
+                newLap['Extensions']['MaxRunCadence'] = lap.find('./tcx:Extensions/ns3:LX/ns3:MaxRunCadence', self.ns).text
+
             laps.append(newLap)
             oldLap = newLap
 
@@ -183,14 +190,12 @@ class Tcx():
 
             newTrackpoint['Extensions'] = {}
 
-            if trackpoint.find('./tcx:Extensions/ns3:Speed', self.ns) != None:
-                newTrackpoint['Extensions']['Speed'] = trackpoint.find('./tcx:Extensions/tcx:ns3:Speed', self.ns).text
-                print(newTrackpoint['Extensions']['Speed'])
-                exit()
+            if trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:Speed', self.ns) != None:
+                newTrackpoint['Extensions']['Speed'] = trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:Speed', self.ns).text
 
-            if trackpoint.find('./tcx:Extensions/tcx:ns3:RunCadence', self.ns) != None:
-                newTrackpoint['Extensions']['RunCadence'] = trackpoint.find('./tcx:Extensions/tcx:ns3:RunCadence', self.ns).text
-            
+            if trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:RunCadence', self.ns) != None:
+                newTrackpoint['Extensions']['RunCadence'] = trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:RunCadence', self.ns).text
+                    
             trackpoints.append(newTrackpoint)
             originalOldTrackpoint = trackpoint
             updatedOldTrackpoint = newTrackpoint
@@ -207,12 +212,6 @@ class Tcx():
         root = ET.Element('TrainingCenterDatabase')
         # Tell the library to set up the long element names.
 
-        root.set('xmlns', 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2')
-        root.set('xmlns:ns2', 'http://www.garmin.com/xmlschemas/UserProfile/v2')
-        root.set('xmlns:ns3', 'http://www.garmin.com/xmlschemas/ActivityExtension/v2')
-        root.set('xmlns:ns4', 'http://www.garmin.com/xmlschemas/ProfileExtension/v1')
-        root.set('xmlns:ns5', 'http://www.garmin.com/xmlschemas/ActivityGoals/v1')
-        root.set('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance')
         root.set(
             'xsi:schemaLocation',
             ' '.join([
@@ -220,15 +219,22 @@ class Tcx():
                 'http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2.xsd',
             ])
         )
+        root.set('xmlns', 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2')
+        root.set('xmlns:ns2', 'http://www.garmin.com/xmlschemas/UserProfile/v2')
+        root.set('xmlns:ns3', 'http://www.garmin.com/xmlschemas/ActivityExtension/v2')
+        root.set('xmlns:ns4', 'http://www.garmin.com/xmlschemas/ProfileExtension/v1')
+        root.set('xmlns:ns5', 'http://www.garmin.com/xmlschemas/ActivityGoals/v1')
+        root.set('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance')
 
         activities = ET.SubElement(root, 'Activities')
         activity = ET.SubElement(activities, 'Activity')
         activity.set('Sport', 'Running')
         activityId = ET.SubElement(activity, 'Id')
-        activityId.text = data['ActivityId'] + '.000Z'
+        activityId.text = data['ActivityId']
         for item in data['Lap']:
             lap = ET.SubElement(activity, 'Lap')
-            lap.set('StartTime', item['StartTime'])
+            offsetTime = self.getOffsetTime(item['StartTime'])
+            lap.set('StartTime', offsetTime)
             totalTimeSeconds = ET.SubElement(lap, 'TotalTimeSeconds')
             totalTimeSeconds.text = item['TotalTimeSeconds']
             distanceMeters = ET.SubElement(lap, 'DistanceMeters')
@@ -253,10 +259,13 @@ class Tcx():
                 value.text = item['MaximumHeartRateBpm']
             #
             track = ET.SubElement(lap, 'Track')
-            for point in item['Track']:
+            for index,point in enumerate(item['Track']):
+                if (index % 2) != 0:
+                    continue
                 trackpoint = ET.SubElement(track, 'Trackpoint')
                 time = ET.SubElement(trackpoint, 'Time')
-                time.text = point['Time']
+                offsetTime = self.getOffsetTime(point['Time'])
+                time.text = offsetTime
                 #
                 if 'DistanceMeters' in point.keys():
                     distance = ET.SubElement(trackpoint, 'DistanceMeters')
@@ -286,8 +295,36 @@ class Tcx():
                 #    
                 if 'RunCadence' in point['Extensions'].keys():
                     cadence = ET.SubElement(tpx, 'RunCadence')
-                    cadence.text = point['Extensions']['RunCadence']    
-            
+                    cadence.text = point['Extensions']['RunCadence']
+
+            if 'Extensions' in item.keys():
+                extension = ET.SubElement(lap, 'Extensions')
+                ns3Lx = ET.SubElement(extension, 'ns3:LX')
+                avgSpeed = ET.SubElement(ns3Lx, 'AvgSpeed')
+                avgSpeed.text = item['Extensions']['AvgSpeed']
+                avgRunCadence = ET.SubElement(ns3Lx, 'AvgSpeed')
+                avgRunCadence.text = item['Extensions']['AvgRunCadence']
+                maxRunCadence = ET.SubElement(ns3Lx, 'MaxRunCadence')
+                maxRunCadence.text = item['Extensions']['MaxRunCadence']
+        
+        # author = ET.SubElement(root, 'Author')
+        # author.set('xsi:type', 'Application_t')
+        # name = ET.SubElement(author, 'Name')
+        # name.text = 'Connect Api'
+        # build = ET.SubElement(author, 'Build')
+        # version = ET.SubElement(build, 'Version')
+        # versionMajor = ET.SubElement(version, 'VersionMajor')
+        # versionMajor.text = '0'
+        # versionMinor = ET.SubElement(version, 'VersionMinor')
+        # versionMinor.text = '0'
+        # buildMajor = ET.SubElement(version, 'BuildMajor')
+        # buildMajor.text = '0'
+        # buildMinor = ET.SubElement(version, 'BuildMinor')
+        # buildMinor.text = '0'
+        # langID = ET.SubElement(author, 'LangID')
+        # langID.text = 'en'
+        # partNumber = ET.SubElement(author, 'PartNumber')
+        # partNumber.text = '006-D2449-00'
 
         orig_stdout = sys.stdout
         f = open(self.outputFile, 'w')
@@ -298,8 +335,27 @@ class Tcx():
         sys.stdout = orig_stdout
         f.close()
 
+    def getOffsetTimeDiff(self):
+        if self.newActivityDate == '':
+            return 0
+
+        generaleFormat = '%Y-%m-%dT%H:%M:%S.%fZ'
+        newTimestamp = int(datetime.strptime(self.newActivityDate, generaleFormat).strftime('%s'))
+        oldTimestamp = int(datetime.strptime(self.activity.Id.text, generaleFormat).strftime('%s'))
+        
+        return int(newTimestamp - oldTimestamp)
+
+    def getOffsetTime(self, oldTime):
+        if self.offsetTimeDiff == 0:
+            return oldTime
+
+        generaleFormat = '%Y-%m-%dT%H:%M:%S.%fZ'
+        updateTime = datetime.strptime(oldTime, generaleFormat) + timedelta(seconds=self.offsetTimeDiff)
+        
+        return updateTime.strftime(generaleFormat)
+
     def newHeartRate(self, oldHeartRate):
-        return str(int(int(oldHeartRate) * self.diffInPercent))
+        return str(int(int(oldHeartRate) * self.hRDiffCoeficient))
 
     def newDatetime(self, currentTime, updatedOldTime, originalOldTime):
         generaleFormat = '%Y-%m-%dT%H:%M:%S.%fZ'
