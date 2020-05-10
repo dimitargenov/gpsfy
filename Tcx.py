@@ -10,14 +10,10 @@ from lxml import etree
 import xml.etree.ElementTree as ET
 
 from lxml import objectify
-#ns1 = 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2'
-#ns2 = 'http://www.garmin.com/xmlschemas/ActivityExtension/v2'        
 nso = {
     'ts': 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2',
     'g': 'http://www.garmin.com/xmlschemas/ActivityExtension/v2',
 }
-#edited_folder = 'edited';
-#originals_folder = 'originals'
 ns5="http://www.garmin.com/xmlschemas/ActivityGoals/v1"
 ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2"
 ns2="http://www.garmin.com/xmlschemas/UserProfile/v2"
@@ -42,6 +38,8 @@ class Tcx():
         self.newActivityDate = data['newActivityDate']
         #TODO
         self.newActivityHr = data['newActivityHr']
+        self.forStrava = bool(data['forStrava'])
+        self.newActivityCadence = data['cadence']
 
         tree = objectify.parse(self.inputFile)
         self.root = tree.getroot()
@@ -49,16 +47,32 @@ class Tcx():
         self.offsetTimeDiff = self.getOffsetTimeDiff()
         self.diffInPercent = self.calculateDiffInPercent()
         self.hRDiffCoeficient = self.calculatehRDiffCoeficient()
+        self.cadenceDiffCoeficient = self.calculateCadenceDiffCoeficient()
+        # print(self.cadenceDiffCoeficient)
+        # exit()
+
+        #Check for missing params
+        # if self.newActivityDate == None:
+        #     self.newActivityDate = self.activity.Id.text
         
     def calculateDiffInPercent(self):
-        return round(float(self.getTimeInSeconds(self.newActivityTime) / self.duration), 3)   
+        if (self.newActivityTime == None):
+            return 0
+        else:    
+            return round(float(self.getTimeInSeconds(self.newActivityTime) / self.duration), 3)   
 
     def calculatehRDiffCoeficient(self):
-        if self.newActivityHr.isnumeric():
+        if self.newActivityHr != None and self.newActivityHr.isnumeric():
             return round(int(self.newActivityHr) / self.heartRate, 2)
         else:
             return 1
 
+    def calculateCadenceDiffCoeficient(self):
+        if self.newActivityCadence != None and self.newActivityCadence.isnumeric():
+            return round(int(self.newActivityCadence) / self.cadence, 2)
+        else:
+            return 1
+    
     @property
     def activityType(self):
         return self.activity.attrib['Sport'].lower()
@@ -90,7 +104,15 @@ class Tcx():
         _len = len([int(x.text) for x in self.root.xpath('//ns:HeartRateBpm/ns:Value', namespaces={'ns': ns})])
 
         return int(round(_sum / _len))
-                      
+    
+    @property
+    def cadence(self):
+        ns = 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2'
+        ns3 = 'http://www.garmin.com/xmlschemas/ActivityExtension/v2'
+        _sum = sum([int(x.text) for x in self.root.xpath('//ns:Extensions/ns3:TPX/ns3:RunCadence', namespaces={'ns': ns, 'ns3': ns3})])
+        _len = len([int(x.text) for x in self.root.xpath('//ns:Extensions/ns3:TPX/ns3:RunCadence', namespaces={'ns': ns, 'ns3': ns3})])
+
+        return int(round(_sum / _len ))
     
     @property    
     def diff(self):
@@ -148,8 +170,15 @@ class Tcx():
             if lap.find('./tcx:Extensions/ns3:LX', self.ns) != None:
                 newLap['Extensions'] = {}
                 newLap['Extensions']['AvgSpeed'] = lap.find('./tcx:Extensions/ns3:LX/ns3:AvgSpeed', self.ns).text
-                newLap['Extensions']['AvgRunCadence'] = lap.find('./tcx:Extensions/ns3:LX/ns3:AvgRunCadence', self.ns).text
+                newLap['Extensions']['AvgRunCadence'] = self.newCadence(
+                    lap.find('./tcx:Extensions/ns3:LX/ns3:AvgRunCadence', self.ns).text
+                )
+                # newLap['Extensions']['AvgRunCadence'] = lap.find('./tcx:Extensions/ns3:LX/ns3:AvgRunCadence', self.ns).text
                 newLap['Extensions']['MaxRunCadence'] = lap.find('./tcx:Extensions/ns3:LX/ns3:MaxRunCadence', self.ns).text
+            elif lap.find('./tcx:Cadence', self.ns).text != None:
+                newLap['Cadence'] = self.newCadence(
+                    lap.find('./tcx:Cadence', self.ns).text
+                )
 
             laps.append(newLap)
             oldLap = newLap
@@ -194,12 +223,15 @@ class Tcx():
                 newTrackpoint['Extensions']['Speed'] = trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:Speed', self.ns).text
 
             if trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:RunCadence', self.ns) != None:
-                newTrackpoint['Extensions']['RunCadence'] = trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:RunCadence', self.ns).text
-                    
+                newTrackpoint['Extensions']['RunCadence'] = self.newCadence(
+                   trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:RunCadence', self.ns).text
+                )
+                # newTrackpoint['Extensions']['RunCadence'] = trackpoint.find('./tcx:Extensions/ns3:TPX/ns3:RunCadence', self.ns).text
+
             trackpoints.append(newTrackpoint)
             originalOldTrackpoint = trackpoint
             updatedOldTrackpoint = newTrackpoint
-            
+        #exit()
         return trackpoints
 
     def parse(self, tag, path):
@@ -260,8 +292,8 @@ class Tcx():
             #
             track = ET.SubElement(lap, 'Track')
             for index,point in enumerate(item['Track']):
-                if (index % 2) != 0:
-                    continue
+                # if (index % 2) != 0:
+                #     continue
                 trackpoint = ET.SubElement(track, 'Trackpoint')
                 time = ET.SubElement(trackpoint, 'Time')
                 offsetTime = self.getOffsetTime(point['Time'])
@@ -288,7 +320,11 @@ class Tcx():
                     value.text = point['HeartRateBpm']
                 #    
                 extension = ET.SubElement(trackpoint, 'Extensions')
-                tpx = ET.SubElement(extension, 'ns3:TPX')    
+                if self.forStrava:
+                    tpx = ET.SubElement(extension, 'TPX')
+                    tpx.set("xmlns","http://www.garmin.com/xmlschemas/ActivityExtension/v2")
+                else:
+                    tpx = ET.SubElement(extension, 'ns3:TPX')    
                 if 'Speed' in point['Extensions'].keys():
                     speed = ET.SubElement(tpx, 'Speed')
                     speed.text = point['Extensions']['Speed']
@@ -299,13 +335,21 @@ class Tcx():
 
             if 'Extensions' in item.keys():
                 extension = ET.SubElement(lap, 'Extensions')
-                ns3Lx = ET.SubElement(extension, 'ns3:LX')
+                if self.forStrava:
+                    ns3Lx = ET.SubElement(extension, 'TPX')
+                    ns3Lx.set("xmlns","http://www.garmin.com/xmlschemas/ActivityExtension/v2")
+                else:
+                    ns3Lx = ET.SubElement(extension, 'ns3:LX')
                 avgSpeed = ET.SubElement(ns3Lx, 'AvgSpeed')
                 avgSpeed.text = item['Extensions']['AvgSpeed']
                 avgRunCadence = ET.SubElement(ns3Lx, 'AvgSpeed')
                 avgRunCadence.text = item['Extensions']['AvgRunCadence']
                 maxRunCadence = ET.SubElement(ns3Lx, 'MaxRunCadence')
                 maxRunCadence.text = item['Extensions']['MaxRunCadence']
+
+            if 'Cadence' in item.keys():
+                cadence = ET.SubElement(lap, 'Cadence')
+                cadence.text = item['Cadence']    
         
         # author = ET.SubElement(root, 'Author')
         # author.set('xsi:type', 'Application_t')
@@ -336,7 +380,7 @@ class Tcx():
         f.close()
 
     def getOffsetTimeDiff(self):
-        if self.newActivityDate == '':
+        if self.newActivityDate == None:
             return 0
 
         generaleFormat = '%Y-%m-%dT%H:%M:%S.%fZ'
@@ -355,18 +399,30 @@ class Tcx():
         return updateTime.strftime(generaleFormat)
 
     def newHeartRate(self, oldHeartRate):
+        if self.newActivityHr == None:
+            return oldHeartRate
+
         return str(int(int(oldHeartRate) * self.hRDiffCoeficient))
 
+    def newCadence(self, oldCadence):
+        if self.newActivityCadence == None:
+            return oldCadence
+
+        return str(int(int(oldCadence) * self.cadenceDiffCoeficient))
+
     def newDatetime(self, currentTime, updatedOldTime, originalOldTime):
+        if self.newActivityTime == None:
+            return currentTime
+
         generaleFormat = '%Y-%m-%dT%H:%M:%S.%fZ'
 
         currentTimestamp = float(datetime.strptime(currentTime, generaleFormat).strftime('%s.%f'))
-        updatedOldTimestamp = float(datetime.strptime(updatedOldTime, generaleFormat).strftime('%s.%f'))
+        updatedOldTimestamp = round(float(datetime.strptime(updatedOldTime, generaleFormat).strftime('%s.%f')), 3)
         originalOldTimestamp = float(datetime.strptime(originalOldTime, generaleFormat).strftime('%s.%f'))
         ## FORMULA ##
         #(currentTime-oldTime)*percent+updatedOldTime
 
-        newTime = (currentTimestamp - originalOldTimestamp)*self.diffInPercent + updatedOldTimestamp
+        newTime = round((currentTimestamp - originalOldTimestamp)*self.diffInPercent, 3) + updatedOldTimestamp
         
         try:
             return datetime.fromtimestamp(newTime).strftime(generaleFormat)
@@ -375,7 +431,10 @@ class Tcx():
             exit()
 
     def newTimeInSeconds(self, currentTime):
-        return str(round(float(currentTime) * self.diffInPercent, 1))   
+        if self.newActivityTime == None:
+            return currentTime
+        else:    
+            return str(round(float(currentTime) * self.diffInPercent, 1))   
 
     def getTimeInSeconds(self, timestr):
         ftr = [3600,60,1]
