@@ -1,0 +1,15 @@
+use sports_tracker;
+SELECT created, totalDistance/1000 as distance, CONCAT(FLOOR(avgPace),':', LPAD(Floor(avgPace*60 % 60),2,'0')) as pace, 
+SEC_TO_TIME(totalTime) as time, hrAvg, stepCount*60/totalTime as cadence, 
+stepCount, totalDistance / stepCount as strideLength,
+pte, ascent, recoveryTime/3600 as recovery, energyConsumption, energyConsumption*3600/totalTime calPerHour,
+(1+(totalDistance/10000)) as distanceCoef,
+((1+(totalDistance/10000))*60/(3.6*avgPace)/hrAvg) as myCoef
+FROM workout
+WHERE true
+AND activityId = 1
+AND totalDistance > 4000
+AND created > "2020-01-27"
+-- ORDER BY strideLength DESC
+ORDER BY mycoef DESC
+LIMIT 50;

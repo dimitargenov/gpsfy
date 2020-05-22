@@ -1,0 +1,13 @@
+use sports_tracker;
+SELECT 
+sum(totalDistance/1000) as milleage,
+avg(totalDistance*3.6/totalTime) as speed,
+avg(hrAvg) as hr,
+avg(stepCount*60/totalTime) as cadence,
+sum(energyConsumption) as energy,
+avg(totalDistance / stepCount) as stride
+FROM workout
+WHERE true
+AND activityId = 1
+AND created > "2020-02" AND created < "2020-03-01"
+AND avgPace < 5.5
